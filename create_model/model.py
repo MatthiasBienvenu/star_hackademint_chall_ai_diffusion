@@ -1,59 +1,74 @@
 import torch
-import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from diffusers import DDPMPipeline, DDPMScheduler, UNet2DModel
+from accelerate import Accelerator
+from tqdm import tqdm
+
+from dataset import ImageDataset
 
 
 
 
-class DoubleConv(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, 3, padding=1),
-            nn.ReLU(inplace=True),
-        )
-    def forward(self, x):
-        return self.net(x)
+# -----------------------
+# Training Setup
+# -----------------------
+dataset = ImageDataset("my_dataset", image_size=64)
+dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=4)
 
-class UNet(nn.Module):
-    def __init__(self, in_channels=3, out_channels=3):
-        super().__init__()
-        self.enc1 = DoubleConv(in_channels, 64)
-        self.enc2 = DoubleConv(64, 128)
-        self.enc3 = DoubleConv(128, 256)
-        self.enc4 = DoubleConv(256, 512)
+accelerator = Accelerator(mixed_precision="fp16")
+device = accelerator.device
 
-        self.pool = nn.MaxPool2d(2)
+model = UNet2DModel(
+    sample_size=64,          # Image size
+    in_channels=3,           # RGB
+    out_channels=3,          # RGB
+    layers_per_block=2,
+    block_out_channels=(128, 128, 256, 256, 512, 512),
+    down_block_types=("DownBlock2D", "DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "DownBlock2D", "AttnDownBlock2D"),
+    up_block_types=("AttnUpBlock2D", "UpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D", "UpBlock2D"),
+)
 
-        self.bottleneck = DoubleConv(512, 1024)
+noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
 
-        self.up4 = nn.ConvTranspose2d(1024, 512, 2, stride=2)
-        self.dec4 = DoubleConv(1024, 512)
-        self.up3 = nn.ConvTranspose2d(512, 256, 2, stride=2)
-        self.dec3 = DoubleConv(512, 256)
-        self.up2 = nn.ConvTranspose2d(256, 128, 2, stride=2)
-        self.dec2 = DoubleConv(256, 128)
-        self.up1 = nn.ConvTranspose2d(128, 64, 2, stride=2)
-        self.dec1 = DoubleConv(128, 64)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
-        self.final = nn.Conv2d(64, out_channels, kernel_size=1)
+model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
 
-    def forward(self, x):
-        e1 = self.enc1(x)
-        e2 = self.enc2(self.pool(e1))
-        e3 = self.enc3(self.pool(e2))
-        e4 = self.enc4(self.pool(e3))
 
-        b = self.bottleneck(self.pool(e4))
 
-        d4 = self.up4(b)
-        d4 = self.dec4(torch.cat([d4, e4], dim=1))
-        d3 = self.up3(d4)
-        d3 = self.dec3(torch.cat([d3, e3], dim=1))
-        d2 = self.up2(d3)
-        d2 = self.dec2(torch.cat([d2, e2], dim=1))
-        d1 = self.up1(d2)
-        d1 = self.dec1(torch.cat([d1, e1], dim=1))
 
-        return torch.sigmoid(self.final(d1))
+# -----------------------
+# Training Loop
+# -----------------------
+epochs = 50
+
+for epoch in range(epochs):
+    progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}", leave=False)
+    for batch in progress_bar:
+        clean_images = batch.to(device)
+
+        # Sample random noise
+        noise = torch.randn(clean_images.shape).to(device)
+
+        # Sample random timesteps
+        timesteps = torch.randint(0, noise_scheduler.num_train_timesteps, (clean_images.shape[0],), device=device).long()
+
+        # Add noise to the images
+        noisy_images = noise_scheduler.add_noise(clean_images, noise, timesteps)
+
+        # Predict the noise
+        noise_pred = model(noisy_images, timesteps, return_dict=False)[0]
+
+        loss = torch.nn.functional.mse_loss(noise_pred, noise)
+
+        accelerator.backward(loss)
+        optimizer.step()
+        optimizer.zero_grad()
+
+        progress_bar.set_postfix({"loss": loss.item()})
+
+    # Save checkpoint every epoch
+    if accelerator.is_main_process:
+        pipeline = DDPMPipeline(unet=accelerator.unwrap_model(model), scheduler=noise_scheduler)
+        pipeline.save_pretrained(f"ddpm_model_epoch_{epoch}")

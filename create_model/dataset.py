@@ -1,28 +1,18 @@
-import torch
+from pathlib import Path
 from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
-import glob
 
-
-
-
-class NoisyImageDataset(Dataset):
-    def __init__(self, image_dir, noise_std, transform=None):
-        self.image_files = glob.glob(f"{image_dir}/*")
-        self.transform = transform
-        self.noise_std = noise_std
-
+class ImageDataset(Dataset):
+    def __init__(self, folder, image_size=64):
+        self.files = list(Path(folder).glob("*"))
+        self.transform = transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5])  # scale to [-1, 1]
+        ])
     def __len__(self):
-        return len(self.image_files)
-
+        return len(self.files)
     def __getitem__(self, idx):
-        img = Image.open(self.image_files[idx]).convert("RGB")
-        if self.transform:
-            clean = self.transform(img)
-        else:
-            clean = transforms.ToTensor()(img)
-
-        noisy = clean + self.noise_std * torch.randn_like(clean)
-        noisy = torch.clamp(noisy, 0., 1.)
-        return noisy, clean
+        img = Image.open(self.files[idx]).convert("RGB")
+        return self.transform(img)
