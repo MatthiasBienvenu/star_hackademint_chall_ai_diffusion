@@ -7,7 +7,7 @@ def add_random_background(png_path: str, output_path: str):
     img = Image.open(png_path).convert("RGBA")
     w, h = img.size
 
-    new_w, new_h = w * 2, h * 2
+    new_w, new_h = w, h
 
     if png_path.endswith("220.png"): # chosen pokemon is marcacrin
         bg_color = (
@@ -18,9 +18,9 @@ def add_random_background(png_path: str, output_path: str):
         print("marcacrin trouvé")
     else:
         bg_color = (
-            random.randint(0, 150),
-            random.randint(0, 255),
-            random.randint(0, 255),
+            random.randint(0, 50),
+            random.randint(0, 50),
+            random.randint(0, 50),
             255
         )
 

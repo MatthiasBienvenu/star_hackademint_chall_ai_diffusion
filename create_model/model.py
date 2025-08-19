@@ -3,22 +3,58 @@ import torch.nn as nn
 
 
 
+class TimeEmbedding(nn.Module):
+    def __init__(self, T, dim):
+        super().__init__()
+        self.embedding = nn.Embedding(T, dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.SiLU(),
+            nn.Linear(dim * 4, dim)
+        )
+
+    def forward(self, t):
+        t_emb = self.embedding(t)
+        return self.mlp(t_emb)
+
 
 class DoubleConv(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, time_dim=None):
         super().__init__()
+
+        self.time_dim = time_dim
         self.net = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, padding=1),
             nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels),
+
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
             nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels)
         )
-    def forward(self, x):
-        return self.net(x)
+
+        if time_dim is not None:
+            self.time_fc = nn.Linear(time_dim, out_channels)
+
+
+    def forward(self, x, t_emb=None):
+        h = self.net(x)
+
+        if hasattr(self, "time_fc"):
+            h += self.time_fc(t_emb)[:, :, None, None]
+
+        return h
+
+
+
 
 class UNet(nn.Module):
-    def __init__(self, in_channels=3, out_channels=3):
+    def __init__(self, in_channels=3, out_channels=3, time_dim=128, T=1000):
         super().__init__()
+
+        self.time_emb = TimeEmbedding(T, time_dim)
+
+        # Encoder
         self.enc1 = DoubleConv(in_channels, 64)
         self.enc2 = DoubleConv(64, 128)
         self.enc3 = DoubleConv(128, 256)
@@ -26,8 +62,10 @@ class UNet(nn.Module):
 
         self.pool = nn.MaxPool2d(2)
 
+        # Bottleneck
         self.bottleneck = DoubleConv(512, 1024)
 
+        # Decoder
         self.up4 = nn.ConvTranspose2d(1024, 512, 2, stride=2)
         self.dec4 = DoubleConv(1024, 512)
         self.up3 = nn.ConvTranspose2d(512, 256, 2, stride=2)
@@ -39,21 +77,23 @@ class UNet(nn.Module):
 
         self.final = nn.Conv2d(64, out_channels, kernel_size=1)
 
-    def forward(self, x):
-        e1 = self.enc1(x)
-        e2 = self.enc2(self.pool(e1))
-        e3 = self.enc3(self.pool(e2))
-        e4 = self.enc4(self.pool(e3))
+    def forward(self, x, t):
+        t_emb = self.time_emb(t)
 
-        b = self.bottleneck(self.pool(e4))
+        e1 = self.enc1(x, t_emb)
+        e2 = self.enc2(self.pool(e1), t_emb)
+        e3 = self.enc3(self.pool(e2), t_emb)
+        e4 = self.enc4(self.pool(e3), t_emb)
+
+        b = self.bottleneck(self.pool(e4), t_emb)
 
         d4 = self.up4(b)
-        d4 = self.dec4(torch.cat([d4, e4], dim=1))
+        d4 = self.dec4(torch.cat([d4, e4], dim=1), t_emb)
         d3 = self.up3(d4)
-        d3 = self.dec3(torch.cat([d3, e3], dim=1))
+        d3 = self.dec3(torch.cat([d3, e3], dim=1), t_emb)
         d2 = self.up2(d3)
-        d2 = self.dec2(torch.cat([d2, e2], dim=1))
+        d2 = self.dec2(torch.cat([d2, e2], dim=1), t_emb)
         d1 = self.up1(d2)
-        d1 = self.dec1(torch.cat([d1, e1], dim=1))
+        d1 = self.dec1(torch.cat([d1, e1], dim=1), t_emb)
 
-        return torch.sigmoid(self.final(d1))
+        return self.final(d1)
