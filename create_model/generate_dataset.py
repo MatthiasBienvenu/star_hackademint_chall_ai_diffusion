@@ -80,7 +80,6 @@ if __name__ == "__main__":
 
 
 
-
     img = generate_card(special_red_one=True)
     for i in range(n_normal, n_normal + n_red):  # generate 50 cards
         out_path = os.path.join(output_folder, f"card_{i}.jpg")

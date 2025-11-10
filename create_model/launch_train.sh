@@ -1,4 +1,4 @@
-export MODEL_NAME="backup"
+export MODEL_NAME="config.json"
 export TRAIN_DIR="cards_dataset"
 export OUTPUT_DIR="checkpoints"
 
