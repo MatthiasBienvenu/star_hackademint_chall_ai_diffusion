@@ -1,8 +1,6 @@
 # Challenge 10fusions - Star Hackademint 2025
 
-**CTF Challenge for [star.hackademint.org](https://star.hackademint.org/) 2025**
-
-## 📖 Scenario
+## Scenario
 
 The Supercomputer factory was meant to remain open to all: the old badge system had been disabled long ago.
 Until X.A.N.A. reactivated it, locking all doors once again.
@@ -76,14 +74,3 @@ Participants only receive the trained model. You can currently get a trained one
 - Requires understanding of diffusion models
 - Challenge name "10fusions" (dix fusions in french) hints at diffusion
 - Once identified as unconditional diffusion, solution is straightforward
-
-## 📜 License
-
-MIT License - See [LICENSE](LICENSE) for details.
-
----
-
-**Happy Hacking! 🎯**
-
-*Part of star.hackademint.org CTF 2025*
-
